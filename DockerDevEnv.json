@@ -1,0 +1,71 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "This is a CF template that Launches a Docker dev server made from our securish ami that we made.",
+
+  "Parameters" : {
+    "InstanceType" : {
+      "Description" : "The EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.micro",
+      "AllowedValues" : [ "t2.micro","m1.small","m1.medium","m1.large","m1.xlarge","m2.xlarge","m2.2xlarge","m2.4xlarge","m3.xlarge","m3.2xlarge","c1.medium","c1.xlarge","cc1.4xlarge","cc2.8xlarge","cg1.4xlarge"],
+      "ConstraintDescription" : "Must be a valid EC2 instance type."
+    },
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 keypair to enable SSH access to the instances",
+      "Type" : "AWS::EC2::KeyPair::KeyName"
+    },
+    "Subnets" : {
+      "Description" : "List of VPC subnet IDs for the cluster",
+      "Type" : "List<AWS::EC2::Subnet::Id>"
+    },
+    "VpcId" : {
+      "Description" : "VPC associated with the provided subnets",
+      "Type" : "AWS::EC2::VPC::Id"
+    },
+    "AdminSecurityGroup" : {
+      "Description" : "Existing security group that should be granted administrative access to Docker Dev Instance (e.g., 'sg-123456')",
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    }
+  },
+
+  "Mappings" : {
+    "RegionMap" : {
+      "us-east-1" : {
+        "AMI" : "ami-2358c743"
+      },
+      "us-west-1" : {
+        "AMI" : "ami-2358c743"
+      },
+      "us-west-2" : {
+        "AMI" : "ami-2358c743"
+      }
+    }
+  },
+  "Resources" : {
+    "MyDockerInstance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Properties" : {
+        "KeyName" : { "Ref" : "KeyName" },
+        "ImageId" : { "Fn::FindInMap" : [ "RegionMap", { "Ref" : "AWS::Region" }, "AMI"] },
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "SubnetId" : "subnet-1ac72e41",
+        "SecurityGroupIds" : ["sg-f177dc8a"],
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -ex\n",
+          "# Start Docker dev Instance\n",
+          "sudo yum update && install -y\n",
+          "sudo service docker stop\n",
+          "sudo dockerd --selinux-enabled=true --userland-proxy=false --live-restore=true --icc=false --disable-legacy-registry=false\n",
+          "# All is well, signal success\n",
+          "cfn-signal -e 0 -r \"Stack setup complete\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "#EOF"
+        ]]}}
+      }
+    },
+
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+      }
+    }
+  }

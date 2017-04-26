@@ -1,0 +1,226 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Launches a NGINX web server using Docker on our custom Docker AMI with CIS benchmarks.",
+
+  "Parameters" : {
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.micro",
+      "AllowedValues" : [ "t2.micro","m1.small","m1.medium","m1.large","m1.xlarge","m2.xlarge","m2.2xlarge","m2.4xlarge","m3.xlarge","m3.2xlarge","c1.medium","c1.xlarge","cc1.4xlarge","cc2.8xlarge","cg1.4xlarge"],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+    "KeyNames" : {
+      "Description" : "Name of an existing EC2 keypair to enable SSH access to the instances",
+      "Type" : "AWS::EC2::KeyPair::KeyName"
+    },
+    "DnsPrefix" : {
+      "Description" : "Prefix for Jenkins' DNS record (<prefix>.<zone>)",
+      "Type": "String",
+      "Default": "jenkins"
+    },
+    "DnsZone" : {
+      "Description" : "Route53-hosted zone to use for the DNS record (<prefix>.<zone>)",
+      "Type": "String",
+      "Default": "securitysandman.com"
+    },
+    "DockerImage" : {
+      "Description" : "Path of the Jenkins Docker image (format: '[<registry>[:<port>]/]<repository>:<version>')",
+      "Type" : "String",
+      "Default" : "aespinosa/jenkins"
+    },
+    "S3Bucket" : {
+      "Description" : "Existing S3 bucket to use for Jenkins backups and restores",
+      "Type" : "String",
+      "Default": "secsandman-nginx"
+    },
+    "S3Prefix" : {
+      "Description" : "[Optional] Key prefix to use for Jenkins backups",
+      "Type" : "String",
+      "Default": ""
+    },
+    "Subnets" : {
+      "Description" : "List of VPC subnet IDs for the cluster",
+      "Type" : "List<AWS::EC2::Subnet::Id>"
+    },
+    "VpcId" : {
+      "Description" : "VPC associated with the provided subnets",
+      "Type" : "AWS::EC2::VPC::Id"
+    },
+    "AdminSecurityGroup" : {
+      "Description" : "Existing security group that should be granted administrative access to Jenkins (e.g., 'sg-123456')",
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    }
+  },
+
+  "Mappings" : {
+    "RegionMap" : {
+      "us-east-1" : {
+        "AMI" : "ami-2358c743"
+      },
+      "us-west-1" : {
+        "AMI" : "ami-2358c743"
+      },
+      "us-west-2" : {
+        "AMI" : "ami-2358c743"
+      },
+      "eu-west-1" : {
+        "AMI" : "ami-2358c743"
+      }
+    }
+  },
+
+  "Resources" : {
+    "IAMUser" : {
+      "Type" : "AWS::IAM::User",
+      "Properties" : {
+        "Policies" : [{
+          "PolicyName" : "S3Access",
+          "PolicyDocument" : {
+            "Statement": [{
+              "Effect"   : "Allow",
+              "Action"   : "s3:*",
+              "Resource" : { "Fn::Join" : ["", ["arn:aws:s3:::", {"Ref" : "S3Bucket"} , "/*"]]}
+            }]
+          }
+        },
+        {
+          "PolicyName" : "IAMAccess",
+          "PolicyDocument" : {
+            "Statement" : [{
+              "Effect"    : "Allow",
+              "NotAction" : "iam:*",
+              "Resource"  : "*"
+            }]
+          }
+        }]
+      }
+    },
+
+    "HostKeys" : {
+      "Type" : "AWS::IAM::AccessKey",
+      "Properties" : {
+        "UserName" : { "Ref" : "IAMUser" }
+      }
+    },
+
+    "ServerGroup" : {
+      "Type" : "AWS::AutoScaling::AutoScalingGroup",
+      "Properties" : {
+        "LaunchConfigurationName" : { "Ref" : "LaunchConfig" },
+        "MinSize" : "1",
+        "MaxSize" : "1",
+        "DesiredCapacity" : "1",
+        "LoadBalancerNames" : [ { "Ref" : "ElasticLoadBalancer" } ],
+        "VPCZoneIdentifier" : { "Ref" : "Subnets" }
+      }
+    },
+
+    "LaunchConfig" : {
+      "Type" : "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "config": {
+            "packages" : {
+              "python" : {
+                "awscli":[]
+            }
+          }
+        }
+      }
+    },
+      "Properties" : {
+        "KeyName" : { "Ref" : "KeyNames" },
+        "ImageId" : { "Fn::FindInMap" : [ "RegionMap", { "Ref" : "AWS::Region" }, "AMI"] },
+        "SecurityGroups" : [ { "Ref" : "ServerSecurityGroup" }, { "Ref": "AdminSecurityGroup" } ],
+        "AssociatePublicIpAddress": "true",
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -ex\n",
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  cfn-signal -e 1 -r \"$1\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+          "# Start nginx\n",
+          "sudo service docker start\n",
+          "docker pull jenkins\n",
+          "docker run -p 8080:8080 -p 50000:50000 jenkins\n",
+          "# All is well, signal success\n",
+          "cfn-signal -e 0 -r \"Stack setup complete\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "#EOF"
+          ]]}}
+        }
+      },
+
+    "LbSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Jenkins LBs",
+        "VpcId" : { "Ref" : "VpcId" },
+        "SecurityGroupIngress" :
+          [ { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "8080", "CidrIp" : "0.0.0.0/32" }]
+      }
+    },
+
+    "ServerSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Jenkins servers",
+        "VpcId" : { "Ref" : "VpcId" },
+        "SecurityGroupIngress" :
+          [ { "IpProtocol" : "tcp", "FromPort" : "8080", "ToPort" : "8080", "SourceSecurityGroupId" : { "Ref" : "LbSecurityGroup"} },
+            { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "SourceSecurityGroupId":"sg-002b9d78"}
+          ]
+
+      }
+    },
+
+    "ElasticLoadBalancer" : {
+      "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties" : {
+        "SecurityGroups": [{ "Ref": "LbSecurityGroup" }, { "Ref": "AdminSecurityGroup" }],
+        "Subnets": { "Ref": "Subnets" },
+        "Listeners" : [ {
+          "LoadBalancerPort" : "80",
+          "InstancePort" : "8080",
+          "Protocol" : "HTTP"
+        } ],
+        "HealthCheck" : {
+          "Target" : "TCP:8080",
+          "HealthyThreshold" : "3",
+          "UnhealthyThreshold" : "5",
+          "Interval" : "6",
+          "Timeout" : "5"
+        }
+      }
+    },
+
+    "DnsRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : { "Fn::Join" : [ "", [{"Ref" : "DnsZone"}, "." ]]},
+        "Comment" : "Docker Registry",
+        "Name" : { "Fn::Join" : [ "", [{"Ref" : "DnsPrefix"}, ".", {"Ref" : "DnsZone"}, "."]]},
+        "Type" : "CNAME",
+        "TTL" : "900",
+        "ResourceRecords" : [ { "Fn::GetAtt" : [ "ElasticLoadBalancer", "DNSName" ] } ]
+      }
+    },
+
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    }
+  },
+
+  "Outputs" : {
+    "DnsAddress" : {
+      "Description" : "Jenkins URL",
+      "Value" :  { "Fn::Join" : ["", [
+        "http://", { "Ref" : "DnsRecord" }
+      ]]}
+    }
+  }
+}

@@ -1,0 +1,88 @@
+#1 Bake the follwing into your host. Audit Docker daemon access to docker file systems
+# this example is on a Fedora based system
+
+locate -br 'audit.d$'
+su
+nano /etc/audit/audit.rules
+
+-a exit,always -F path=/usr/bin/docker -F perm=wa
+
+-a exit,always -F path=/var/lib/docker -F perm=wa
+
+-a exit,always -F arch=x86_64 -S open -F auid=0
+
+-a exit,always -F path=/etc/docker -F perm=wa
+
+-a exit,always -F path=/etc/default/docker -F perm=wa
+
+-a exit,always -F path=/etc/docker/daemon.json -F perm=wa
+
+service audit.d restart
+
+#2 Demo of inter-container communication before we lock it down on the host
+
+docker run -d -p 4915:80 nginx
+docker inspect --format '{{  .NetworkSettings.IPAddress }}' zen_ramanujan
+172.17.0.2
+docker ps
+elinks http://localhost:4915
+docker run -it centos bash
+ping 172.17.0.3
+
+
+#3 Lock down other CIS stuff like inter-container communication, old registry, userland, etc. using simple dockerd command
+
+sudo dockerd --selinux-enabled=true --userland-proxy=false --live-restore=true --icc=false --disable-legacy-registry=false
+
+#3 Lock down other CIS by baking the security configs into your OS. This will vary by flavor and the way in which your OS runs services.
+#I'll give you an ubuntu example
+
+
+# Disable live restore and legacy registry
+
+/etc/docker/daemon.json
+--live-restore=true
+--disable-legacy-registry=false
+
+# locate 'docker.service$'
+--live-restore=true
+--disable-legacy-registry=false
+
+
+#AppArmourExample of a SELinux equivivelent for isolating container permissions
+
+sudo invoke-rc.d apparmor start
+sudo update-rc.d apparmor start 37 S .
+docker run --rm -it --security-opt apparmor=docker-default <Container>
+apparmor_parser -r -W /path/to/your_profile
+
+
+#Only accept signed Docker images
+export DOCKER_CONTENT_TRUST=1
+
+# Harden Docker network configs and bake them into your AMI.
+To supply networking options to the Docker server at startup,
+use the DOCKER_OPTS variable in the Docker upstart configuration file.
+For Ubuntu, edit the variable in /etc/default/docker or /etc/sysconfig/docker for CentOS.
+
+--userland-proxy=false
+--icc=false
+
+# Audit the Docker host and local images
+
+docker run -it --net host --pid host --cap-add audit_control \
+    -e DOCKER_CONTENT_TRUST=$DOCKER_CONTENT_TRUST \
+    -v /var/lib:/var/lib \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /usr/lib/systemd:/usr/lib/systemd \
+    -v /etc:/etc --label docker_bench_security \
+    docker/docker-bench-security
+
+    #Test if inter-container communication
+
+    docker run -d -p 4915:80 nginx
+    docker ps
+    docker inspect --format '{{  .NetworkSettings.IPAddress }}'
+    elinks http://
+    docker run -it centos bash
+    ping 172.17.0.2
