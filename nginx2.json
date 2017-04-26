@@ -23,7 +23,7 @@
     "DnsZone" : {
       "Description" : "Route53-hosted zone to use for the DNS record (<prefix>.<zone>)",
       "Type": "String",
-      "Default": "securitysandman.com"
+      "Default": "<your domain>"
     },
     "DockerImage" : {
       "Description" : "Path of the Jenkins Docker image (format: '[<registry>[:<port>]/]<repository>:<version>')",
@@ -33,7 +33,7 @@
     "S3Bucket" : {
       "Description" : "Existing S3 bucket to use for Jenkins backups and restores",
       "Type" : "String",
-      "Default": "secsandman-nginx"
+      "Default": "<your s3 bucket>"
     },
     "S3Prefix" : {
       "Description" : "[Optional] Key prefix to use for Jenkins backups",
@@ -57,16 +57,16 @@
   "Mappings" : {
     "RegionMap" : {
       "us-east-1" : {
-        "AMI" : "ami-2358c743"
+        "AMI" : "<Your AMI ID>"
       },
       "us-west-1" : {
-        "AMI" : "ami-2358c743"
+        "AMI" : "<Your AMI ID>"
       },
       "us-west-2" : {
-        "AMI" : "ami-2358c743"
+        "AMI" : "<Your AMI ID>"
       },
       "eu-west-1" : {
-        "AMI" : "ami-2358c743"
+        "AMI" : "<Your AMI ID>"
       }
     }
   },
@@ -170,7 +170,7 @@
         "VpcId" : { "Ref" : "VpcId" },
         "SecurityGroupIngress" :
           [ { "IpProtocol" : "tcp", "FromPort" : "8080", "ToPort" : "8080", "SourceSecurityGroupId" : { "Ref" : "LbSecurityGroup"} },
-            { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "SourceSecurityGroupId":"sg-002b9d78"}
+            { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "SourceSecurityGroupId":"<Your jumpbox SG ID>"}
           ]
 
       }
