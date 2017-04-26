@@ -1,7 +1,7 @@
 # About Infra as Code Course
 Learn Infra as code. This is a series of courses that teaches Security, AWS, Docker, Jenkins, NGINX and Infra as code concepts.
 
-Watch the videos on Youtube at secSandman@gmail.com or at https:securitysandman.com 
+Watch the videos on Youtube at secSandman@gmail.com or at https://securitysandman.com 
 
 #  Docker Hardening
 
